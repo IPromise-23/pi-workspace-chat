@@ -1,0 +1,16 @@
+{
+  "trust.description": "Pi 可运行工作区中的工具与项目扩展。",
+  "view.title": "Pi 对话",
+  "cmd.focus": "打开对话",
+  "cmd.start": "启动或接续 Pi",
+  "cmd.new": "新建会话",
+  "cmd.history": "会话历史",
+  "cmd.context": "将文件或选区加入对话",
+  "cmd.terminal": "在 Pi 终端中打开",
+  "cmd.folder": "选择工作区目录",
+  "cmd.openSession": "打开 Pi 会话文件",
+  "settings.pi": "工作区所在机器上的 Pi 可执行文件绝对路径。留空则自动查找。",
+  "settings.node": "工作区所在机器上的 Node.js 安装目录绝对路径。扩展宿主找不到 Node.js 时可设置。",
+  "settings.tools": "默认展开工具活动与输出。",
+  "settings.send": "使用 Command/Ctrl+Enter 发送消息。"
+}

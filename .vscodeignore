@@ -1,0 +1,10 @@
+**
+!package.json
+!package.nls.json
+!package.nls.zh-cn.json
+!README.md
+!THIRD_PARTY_NOTICES.txt
+!dist/extension.cjs
+!dist/webview.js
+!media/pi.svg
+!media/style.css

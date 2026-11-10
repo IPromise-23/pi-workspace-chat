@@ -1,0 +1,84 @@
+{
+  "name": "pi-workspace-chat",
+  "displayName": "Pi Workspace Chat",
+  "description": "A VS Code chat interface for your installed Pi Coding Agent, locally or over Remote-SSH.",
+  "version": "0.1.1",
+  "publisher": "ipromise",
+  "private": true,
+  "engines": { "vscode": "^1.145.0", "node": ">=22.19.0" },
+  "categories": ["AI", "Other"],
+  "main": "./dist/extension.cjs",
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": false, "description": "%trust.description%" },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": ["onView:piWorkspace.chat"],
+  "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [{ "id": "piWorkspaceSecondary", "title": "Pi", "icon": "media/pi.svg" }]
+    },
+    "views": {
+      "piWorkspaceSecondary": [{ "id": "piWorkspace.chat", "name": "%view.title%", "type": "webview" }]
+    },
+    "commands": [
+      { "command": "piWorkspace.focus", "title": "%cmd.focus%", "category": "Pi", "icon": "media/pi.svg" },
+      { "command": "piWorkspace.start", "title": "%cmd.start%", "category": "Pi" },
+      { "command": "piWorkspace.newSession", "title": "%cmd.new%", "category": "Pi", "icon": "$(add)" },
+      { "command": "piWorkspace.history", "title": "%cmd.history%", "category": "Pi", "icon": "$(history)" },
+      { "command": "piWorkspace.addContext", "title": "%cmd.context%", "category": "Pi" },
+      { "command": "piWorkspace.terminal", "title": "%cmd.terminal%", "category": "Pi", "icon": "$(terminal)" },
+      { "command": "piWorkspace.changeFolder", "title": "%cmd.folder%", "category": "Pi" },
+      { "command": "piWorkspace.openSessionFile", "title": "%cmd.openSession%", "category": "Pi" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "piWorkspace.terminal", "when": "view == piWorkspace.chat" },
+        { "command": "piWorkspace.changeFolder", "when": "view == piWorkspace.chat && workspaceFolderCount > 1" },
+        { "command": "piWorkspace.openSessionFile", "when": "view == piWorkspace.chat" }
+      ],
+      "editor/title": [
+        { "command": "piWorkspace.focus", "group": "navigation" }
+      ],
+      "editor/context": [
+        { "command": "piWorkspace.addContext", "when": "editorTextFocus && isWorkspaceTrusted", "group": "navigation@35" }
+      ]
+    },
+    "configuration": {
+      "title": "Pi Workspace Chat",
+      "properties": {
+        "piWorkspace.executablePath": {
+          "type": "string", "default": "", "scope": "machine",
+          "description": "%settings.pi%"
+        },
+        "piWorkspace.nodeDirectory": {
+          "type": "string", "default": "", "scope": "machine",
+          "description": "%settings.node%"
+        },
+        "piWorkspace.expandToolResults": {
+          "type": "boolean", "default": false, "description": "%settings.tools%"
+        },
+        "piWorkspace.sendWithModifier": {
+          "type": "boolean", "default": false, "description": "%settings.send%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.cjs",
+    "test:vscode": "npm run build && node test/run-vscode.cjs",
+    "test:pi": "npm run build && node test/pi-smoke.cjs",
+    "package:vsix": "npm run check && npm run build && vsce package --allow-missing-repository --skip-license --no-dependencies --out dist"
+  },
+  "dependencies": { "markdown-it": "15.0.3" },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/markdown-it": "^14.1.2",
+    "@types/vscode": "1.145.0",
+    "@vscode/vsce": "4.1.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

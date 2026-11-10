@@ -1,0 +1,16 @@
+{
+  "trust.description": "Pi can run tools and project extensions in the workspace.",
+  "view.title": "Pi Chat",
+  "cmd.focus": "Open Chat",
+  "cmd.start": "Start or Resume Pi",
+  "cmd.new": "New Conversation",
+  "cmd.history": "Conversation History",
+  "cmd.context": "Add File or Selection to Chat",
+  "cmd.terminal": "Open in Pi Terminal",
+  "cmd.folder": "Choose Workspace Folder",
+  "cmd.openSession": "Open Pi Session File",
+  "settings.pi": "Absolute path to Pi on the workspace host. Leave blank to discover Pi.",
+  "settings.node": "Absolute directory containing Node.js on the workspace host. Useful when Pi is installed outside the extension host's PATH.",
+  "settings.tools": "Expand tool activity and results by default.",
+  "settings.send": "Send with Command/Ctrl+Enter instead of Enter."
+}
