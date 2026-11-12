@@ -63,11 +63,17 @@ locationBar.append(host, folder, version);
 const name = el('div', 'session');
 const info = el('div', 'info');
 info.setAttribute('role', 'status');
+const sendNotice = el('div', 'notice', l(
+  'Send outcome unknown. Check the saved session in Conversation History and review file changes in Source Control before deciding whether to retry.',
+  '发送结果未知。请在会话历史中检查已保存的会话，并在源代码管理中查看文件差异，再决定是否重试。'));
+sendNotice.hidden = true;
+sendNotice.setAttribute('role', 'status');
 const notice = el('div', 'notice');
+notice.setAttribute('role', 'status');
 const noticeText = el('span');
 const settings = button(l('Open Settings', '打开设置'), () => send('settings'));
 notice.append(noticeText, settings);
-head.append(heading, locationBar, name, info, notice);
+head.append(heading, locationBar, name, info, sendNotice, notice);
 
 const scroll = el('section', 'scroll');
 label(scroll, l('Conversation', '对话'));
@@ -92,6 +98,19 @@ const chips = el('div', 'chips');
 const slash = el('div', 'slash');
 slash.hidden = true;
 label(slash, l('Pi commands', 'Pi 命令'));
+const slashActions = el('div', 'slash-actions');
+slashActions.hidden = true;
+const slashCount = el('span', 'muted');
+slashCount.setAttribute('role', 'status');
+const refreshCommands = button(l('Refresh commands', '刷新命令'), () => send('reload'));
+function runSelectedCommand(inTerminal: boolean) {
+  const active = slash.querySelector<HTMLButtonElement>('.active');
+  if (active?.dataset.command) prompt.value = '/' + active.dataset.command;
+  submitPrompt(inTerminal);
+}
+const sidebarCommand = button(l('Run in sidebar', '在侧栏运行'), () => runSelectedCommand(false));
+const terminalCommand = button(l('Run in Pi terminal', '在 Pi 终端执行'), () => runSelectedCommand(true));
+slashActions.append(slashCount, refreshCommands, sidebarCommand, terminalCommand);
 const prompt = el('textarea', 'prompt');
 prompt.maxLength = 120000;
 prompt.rows = 3;
@@ -107,13 +126,13 @@ const actions = el('div', 'actions');
 const attach = iconButton('plus', l('Attach the active file or editor selection', '引用当前文件或编辑器选区'), () => send('attach'));
 const scm = iconButton('changes', l('Review in VS Code Source Control', '在 VS Code 源代码管理中审阅'), () => send('scm'));
 const stop = iconButton('stop', l('Stop', '停止'), () => send('stop'), 'primary round-button');
-const submit = iconButton('send', l('Send', '发送'), submitPrompt, 'primary round-button');
+const submit = iconButton('send', l('Send', '发送'), () => submitPrompt(), 'primary round-button');
 actions.append(attach, scm);
 const sendActions = el('div', 'send-actions');
 sendActions.append(stop, submit);
 toolbar.append(actions, choices, sendActions);
 const composer = el('div', 'composer');
-composer.append(chips, slash, prompt, toolbar);
+composer.append(chips, slash, slashActions, prompt, toolbar);
 footer.append(dialogs, composer);
 app.append(head, scroll, footer);
 app.hidden = true;
@@ -122,6 +141,8 @@ let state: Snapshot | undefined;
 let nextPrompt = 0;
 let pending: { id: string; text: string } | undefined;
 let matchIndex = 0;
+let listedOptions: Snapshot['slash'] = [];
+let slashDismissed = false;
 const rowViews = new Map<string, { node: HTMLElement; data: string; open?: boolean }>();
 const chipViews = new Map<string, HTMLElement>();
 let dialogId: string | undefined;
@@ -133,47 +154,76 @@ function canSend() {
   return !!state?.hasFolder && !pending && state.phase !== 'running' && state.phase !== 'connecting'
     && state.phase !== 'transferring' && state.phase !== 'terminal' && !!prompt.value.trim();
 }
-function submitPrompt() {
+function submitPrompt(inTerminal = false) {
   if (!canSend()) return;
   const id = Date.now().toString(36) + '-' + (++nextPrompt), text = prompt.value;
   pending = { id, text };
+  sendNotice.hidden = true;
   prompt.value = '';
-  send('prompt', { id, text });
+  send('prompt', { id, text, inTerminal });
   updateComposer();
 }
 function updateComposer() {
   submit.disabled = !canSend();
   submit.title = state?.modifierSend ? l('Command/Ctrl+Enter to send', 'Command/Ctrl+Enter 发送')
     : l('Enter to send; Shift+Enter for a new line', 'Enter 发送；Shift+Enter 换行');
-  const regex = prompt.value.match(/^\/([^\s]*)$/);
-  const options = regex && state?.phase === 'idle'
-    ? state.slash.filter(item => item.name.toLowerCase().startsWith(regex[1].toLowerCase())).slice(0, 8) : [];
-  slash.replaceChildren();
+  const regex = prompt.value.match(/^\/([^\s/]*)/);
+  const show = !!regex && !!state?.hasFolder && !pending && !slashDismissed &&
+    (state.phase === 'idle' || state.phase === 'disconnected');
+  const options = show && regex?.[0] === prompt.value
+    ? (state?.slash ?? []).filter(item => item.name.toLowerCase().startsWith(regex[1].toLowerCase())) : [];
   slash.hidden = options.length === 0;
-  if (!options.length) { matchIndex = 0; return; }
-  matchIndex = Math.min(matchIndex, options.length - 1);
-  options.forEach((item, index) => {
-    const b = button('/' + item.name, () => {
-      prompt.value = '/' + item.name + ' ';
-      matchIndex = 0; updateComposer(); prompt.focus();
-    }, 'slash-option' + (matchIndex === index ? ' active' : ''));
-    if (item.description) b.append(el('span', 'muted', item.description));
-    slash.append(b);
-  });
+  slashActions.hidden = !show;
+  const count = regex?.[0] === prompt.value
+    ? state?.commandsLoaded ? l(`${options.length} commands`, `${options.length} 条命令`)
+      : l('Start Pi to discover commands', '启动 Pi 以读取完整命令')
+    : '';
+  if (slashCount.textContent !== count) slashCount.textContent = count;
+  terminalCommand.hidden = !options.length && !regex?.[1];
+  matchIndex = Math.max(0, Math.min(matchIndex, options.length - 1));
+  const selected = options[matchIndex] ?? state?.slash.find(item => item.name === regex?.[1]);
+  sidebarCommand.hidden = !selected || selected.source === 'terminal';
+  if (options.length !== listedOptions.length || options.some((item, index) => {
+    const previous = listedOptions[index];
+    return item.name !== previous.name || item.description !== previous.description || item.source !== previous.source;
+  })) {
+    listedOptions = options;
+    slash.replaceChildren(...options.map(item => {
+      const b = button('/' + item.name, () => {
+        prompt.value = '/' + item.name + ' ';
+        matchIndex = 0; updateComposer(); prompt.focus();
+      }, 'slash-option');
+      b.dataset.command = item.name;
+      if (item.description) b.append(el('span', 'muted', item.description));
+      return b;
+    }));
+    slash.scrollTop = 0;
+  }
+  slash.querySelector('.active')?.classList.remove('active');
+  slash.children[matchIndex]?.classList.add('active');
 }
 
-prompt.addEventListener('input', () => { matchIndex = 0; updateComposer(); });
+prompt.addEventListener('input', () => {
+  slashDismissed = false;
+  matchIndex = 0;
+  if (prompt.value === '/' && state?.hasFolder && state.phase === 'disconnected' && !state.commandsLoaded) send('start');
+  updateComposer();
+});
 prompt.addEventListener('keydown', e => {
   if (e.isComposing || e.keyCode === 229) return;
   if (!slash.hidden && ['ArrowDown', 'ArrowUp'].includes(e.key)) {
     e.preventDefault();
     matchIndex = (matchIndex + (e.key === 'ArrowDown' ? 1 : -1) + slash.children.length) % slash.children.length;
-    updateComposer(); return;
+    updateComposer();
+    slash.children[matchIndex]?.scrollIntoView({ block: 'nearest' });
+    return;
   }
-  if (!slash.hidden && (e.key === 'Tab' || e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {
-    e.preventDefault(); (slash.children[matchIndex] as HTMLButtonElement | undefined)?.click(); return;
+  const complete = slash.children[matchIndex] as HTMLButtonElement | undefined;
+  const exact = !!complete && complete.firstChild?.textContent === prompt.value;
+  if (!slash.hidden && (e.key === 'Tab' || !exact && e.key === 'Enter' && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {
+    e.preventDefault(); complete?.click(); return;
   }
-  if (e.key === 'Escape') slash.hidden = true;
+  if (e.key === 'Escape' && !slashActions.hidden) { slashDismissed = true; updateComposer(); }
   if (e.key === 'Enter' && !e.shiftKey && (!state?.modifierSend || e.metaKey || e.ctrlKey)) {
     e.preventDefault(); submitPrompt();
   }
@@ -400,7 +450,8 @@ window.addEventListener('message', e => {
   else if (message?.type === 'sendResult' && pending?.id === message.id) {
     const sent = pending;
     pending = undefined;
-    if (!message.accepted && !prompt.value && sent) prompt.value = sent.text;
+    if (message.outcome === 'rejected' && !prompt.value && sent) prompt.value = sent.text;
+    if (message.outcome === 'unknown') sendNotice.hidden = false;
     updateComposer();
   } else if (message?.type === 'draft' && typeof message.text === 'string') {
     prompt.value = message.text; updateComposer(); prompt.focus();

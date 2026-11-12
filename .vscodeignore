@@ -3,6 +3,7 @@
 !package.nls.json
 !package.nls.zh-cn.json
 !README.md
+!LICENSE
 !THIRD_PARTY_NOTICES.txt
 !dist/extension.cjs
 !dist/webview.js

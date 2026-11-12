@@ -14,15 +14,16 @@ const vscode = process.env.VSCODE_TEST_EXECUTABLE ??
 const result = spawnSync(vscode, [
   '--user-data-dir', join(temp, 'profile'), '--extensions-dir', join(temp, 'extensions'),
   '--disable-extensions', '--skip-welcome', '--skip-release-notes', '--disable-updates',
-  '--disable-workspace-trust', '--disable-telemetry',
+  '--disable-workspace-trust', '--disable-telemetry', '--remote-debugging-port=0',
   '--extensionDevelopmentPath=' + root, '--extensionTestsPath=' + join(__dirname, 'vscode-smoke.cjs'),
   workspace,
 ], {
   env: { ...process.env, PI_SMOKE_EXECUTABLE: join(__dirname, 'fake-pi.cjs'),
+    PI_SMOKE_DEBUG_PORT: join(temp, 'profile', 'DevToolsActivePort'),
     PI_SMOKE_TRACE: join(temp, 'trace.txt'), PI_SMOKE_STORE: store, PI_SMOKE_NODE: dirname(process.execPath) },
   encoding: 'utf8', timeout: 60000, maxBuffer: 3 * 1024 * 1024,
 });
 if (result.error) console.error('VS Code smoke test could not finish:', result.error.code || 'unknown');
-for (const line of (result.stdout + '\n' + result.stderr).split('\n').filter(x =>
-  /PASS:|AssertionError|Missing VS Code smoke event|vscode-smoke\.cjs/.test(x)).slice(-12)) console.log(line);
+for (const line of ((result.stdout ?? '') + '\n' + (result.stderr ?? '')).split('\n').filter(x =>
+  /PASS:|AssertionError|Error:|vscode-smoke\.cjs/.test(x)).slice(-12)) console.log(line);
 process.exitCode = result.status ?? 1;

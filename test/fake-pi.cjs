@@ -55,13 +55,24 @@ readline.createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line
   else if (msg.type === 'get_available_models') respond(msg, { models: [model] });
   else if (msg.type === 'get_available_thinking_levels') respond(msg, { levels: ['off', 'low'] });
   else if (msg.type === 'get_messages') respond(msg, { messages });
-  else if (msg.type === 'get_commands') respond(msg, { commands: [{ name: 'fixture', source: 'extension', description: 'Test an extension dialog' }] });
+  else if (msg.type === 'get_commands') {
+    const marker = fs.existsSync(path.join(cwd, 'reload-marker'));
+    respond(msg, { commands: [
+      { name: 'fixture', source: 'extension', description: 'Test an extension dialog' },
+      ...Array.from({ length: 50 }, (_, i) => ({ name: 'skill:fixture-' + i, source: 'skill' })),
+      { name: marker ? 'after-refresh' : 'before-refresh', source: 'prompt' },
+    ] });
+  }
   else if (msg.type === 'new_session') {
     file = path.join(store, randomUUID() + '.jsonl'); load(); track('new-session'); respond(msg, { cancelled: false });
   } else if (msg.type === 'switch_session') {
     file = msg.sessionPath; load(); track('switch-session'); respond(msg, { cancelled: false });
   } else if (msg.type === 'prompt') {
     if (msg.message === 'exit') { process.exit(4); }
+    if (msg.message === 'reject prompt') {
+      emit({ type: 'response', id: msg.id, command: msg.type, success: false, error: 'Fixture rejection' });
+      return;
+    }
     if (msg.message === 'hold') { emit({ type: 'agent_start' }); respond(msg, { disposition: 'started' }); return; }
     if (msg.message === '/fixture') {
       request = msg;

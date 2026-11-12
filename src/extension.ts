@@ -13,6 +13,14 @@ const VIEW = 'piWorkspace.chat';
 const PATCH_SCHEME = 'pi-workspace-patch';
 const HANDOFF = 'piWorkspace.terminalHandoff';
 const ROOT = 'piWorkspace.root';
+const PANEL_COMMANDS = new Set(['new', 'resume', 'quit', 'reload']);
+// Pi 1.5's public RPC only reports commands registered by resources.
+const PI_BUILT_INS = [
+  'settings', 'model', 'tree', 'thinking', 'scoped-models', 'export', 'import',
+  'share', 'bug', 'copy', 'name', 'session', 'changelog', 'hotkeys', 'fork',
+  'clone', 'trust', 'login', 'logout', 'new', 'compact', 'resume', 'reload', 'quit',
+];
+const BUILT_IN_NAMES = new Set(PI_BUILT_INS);
 type Root = { folder: vscode.WorkspaceFolder; cwd: string; key: string };
 type Handoff = { name: string; rootKey: string; file?: string; pid?: number };
 type Attachment = ContextChip & { value: string };
@@ -60,7 +68,7 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
   private thinking?: string;
   private models: Snapshot['models'] = [];
   private levels: string[] = [];
-  private slash: Snapshot['slash'] = [];
+  private slash?: Snapshot['slash'];
   private rows = new Map<string, Row>();
   private context: Attachment[] = [];
   private dialogs = new Map<string, { dialog: Dialog; timer?: NodeJS.Timeout }>();
@@ -118,10 +126,29 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
       ? l('Remote', '远程') + ' · ' + (this.root?.folder.uri.authority.split('+').at(-1) || vscode.env.remoteName)
       : l('Local', '本机');
     const config = this.configuration();
+    const panelLabels: Record<string, string> = {
+      new: l('Start a new conversation', '新建会话'),
+      resume: l('Open conversation history', '打开会话历史'),
+      reload: l('Refresh Pi commands', '刷新 Pi 命令'),
+      quit: l('Stop Pi and keep the conversation', '停止 Pi，保留会话'),
+    };
+    const commands: Snapshot['slash'] = PI_BUILT_INS.map(name => ({
+      name, description: panelLabels[name] ?? l('Run in the Pi terminal', '在 Pi 终端执行'),
+      source: PANEL_COMMANDS.has(name) ? 'panel' : 'terminal',
+    }));
+    const seen = new Set(BUILT_IN_NAMES);
+    for (const source of ['prompt', 'extension', 'skill']) {
+      for (const command of this.slash ?? []) {
+        if (command.source !== source || seen.has(command.name)) continue;
+        commands.push(command);
+        seen.add(command.name);
+      }
+    }
     return { host, folder, hasFolder: folders.length > 0, phase: this.phase,
       version: this.version, notice: this.notice, settingsHint: this.settingsHint, session: this.session,
       model: this.model, thinking: this.thinking, models: this.models, thinkingLevels: this.levels,
-      slash: this.slash, context: this.context.map(({ id, label, preview }) => ({ id, label, preview })),
+      slash: commands, commandsLoaded: this.slash !== undefined,
+      context: this.context.map(({ id, label, preview }) => ({ id, label, preview })),
       dialogs: [...this.dialogs.values()].map(d => d.dialog),
       rows: [...this.rows.values()].slice(-180).map(r => ({ ...r, text: bounded(r.text, 12000),
         thinking: r.thinking ? bounded(r.thinking, 8000) : undefined,
@@ -210,7 +237,7 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
       }
       return;
     }
-    if (type === 'prompt') { await this.prompt(str(m.id), str(m.text)); return; }
+    if (type === 'prompt') { await this.prompt(str(m.id), str(m.text), m.inTerminal === true); return; }
     if (type === 'model' || type === 'thinking') {
       await this.exclusive(async () => {
         if (!this.client || this.phase !== 'idle') return;
@@ -225,7 +252,7 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
       });
       return;
     }
-    if (['start', 'new', 'history', 'terminal', 'return', 'folder', 'openSession', 'scm'].includes(type)) {
+    if (['start', 'new', 'history', 'terminal', 'reload', 'return', 'folder', 'openSession', 'scm'].includes(type)) {
       await this.perform(type);
     }
   }
@@ -247,20 +274,45 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
         return;
       }
       if (type === 'folder') {
-        await this.chooseRoot(true); return;
+        const previous = this.root;
+        if (await this.chooseRoot(true) && this.root !== previous) await this.connect();
+        return;
       }
       if (!await this.chooseRoot()) return;
       if (type === 'terminal') { await this.openTerminal(); return; }
-      const alreadyConnected = !!this.client && !this.client.isClosed;
-      if (!await this.connect(type !== 'new')) return;
-      if (type === 'new' && this.client && alreadyConnected) {
-        const result = rec(await this.client.request('new_session', {}, 0));
-        if (result.cancelled) { this.update(undefined, l('Pi kept the current session.', 'Pi 保留了当前会话。')); return; }
+      if (type === 'reload') { await this.reloadCommands(); return; }
+      await this.sessionAction(type);
+    });
+  }
+
+  private async reloadCommands() {
+    if (this.dialogs.size) return false;
+    if (this.client) {
+      const file = this.sessionFile;
+      this.update('transferring', l('Reloading Pi resources…', '正在重新加载 Pi 资源…'));
+      try { await this.disconnect(); }
+      catch (error) { this.update('disconnected'); throw error; }
+      this.returnFile = file;
+    }
+    this.slash = undefined;
+    if (!await this.connect()) return false;
+    this.update('idle', l('Pi commands refreshed.', 'Pi 命令已刷新。'));
+    return true;
+  }
+
+  private async sessionAction(type: string) {
+    const alreadyConnected = !!this.client && !this.client.isClosed;
+    if (!await this.connect(type !== 'new')) return false;
+    if (type === 'new' && this.client && alreadyConnected) {
+      const result = rec(await this.client.request('new_session', {}, 0));
+      if (result.cancelled) this.update(undefined, l('Pi kept the current session.', 'Pi 保留了当前会话。'));
+      else {
         this.clearSessionView();
         await this.syncMeta(this.client, true);
-      } else if (type === 'history') await this.pickHistory();
-      else if (type === 'openSession') await this.pickSessionFile();
-    });
+      }
+    } else if (type === 'history') await this.pickHistory();
+    else if (type === 'openSession') await this.pickSessionFile();
+    return true;
   }
 
   private async exclusive(work: () => Promise<void>) {
@@ -291,6 +343,7 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
     if (this.root?.key === key) return this.root;
     const cwd = await realpath(folder.uri.fsPath);
     if (this.client) await this.disconnect();
+    if (this.root) this.returnFile = undefined;
     this.root = { folder, cwd, key };
     this.recentFolderKey = key;
     await this.ctx.workspaceState.update(ROOT, key);
@@ -298,7 +351,7 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
     this.clearSessionView();
     this.version = undefined;
     this.models = [];
-    this.slash = [];
+    this.slash = undefined;
     this.levels = [];
     this.model = undefined;
     this.thinking = undefined;
@@ -433,14 +486,45 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
     this.update('idle');
   }
 
-  private async prompt(id: string, text: string) {
+  private async prompt(id: string, text: string, forceTerminal = false) {
     if (!id || id.length > 80 || !text.trim() || text.length > 120000) {
-      this.post({ type: 'sendResult', id, accepted: false }); return;
+      this.post({ type: 'sendResult', id, outcome: 'rejected' }); return;
     }
-    let accepted = false;
+    let outcome: 'rejected' | 'unknown' | 'accepted' = 'rejected';
     try {
       await this.exclusive(async () => {
-        if (this.phase === 'terminal' || this.phase === 'running' || !await this.chooseRoot() || !await this.connect()) return;
+        if (this.phase === 'terminal' || this.phase === 'running' || this.dialogs.size) return;
+        const command = text.trim().match(/^\/([^\s/]+)(?=\s|$)/)?.[1];
+        if (forceTerminal && !command) return;
+        const terminalAlias = command === 'terminal' && !this.slash?.some(item => item.name === command);
+        if (command && (forceTerminal || BUILT_IN_NAMES.has(command) || terminalAlias)) {
+          const inTerminal = forceTerminal || !PANEL_COMMANDS.has(command);
+          if (!inTerminal && text.trim() !== '/' + command) {
+            this.update(undefined, l('This sidebar command takes no arguments.', '此侧栏命令不接受参数。'));
+            return;
+          }
+          if (!inTerminal && command === 'quit') {
+            if (this.client) {
+              const file = this.sessionFile;
+              this.update('transferring', l('Stopping Pi…', '正在停止 Pi…'));
+              try { await this.disconnect(); }
+              catch (error) { this.update('disconnected'); throw error; }
+              this.returnFile = file;
+            }
+            this.update('disconnected', l('Pi stopped. Start Pi to continue the saved conversation.',
+              'Pi 已停止。启动 Pi 可继续已保存的会话。'));
+          } else {
+            if (!await this.chooseRoot()) return;
+            if (inTerminal) {
+              if (!await this.openTerminal(terminalAlias ? undefined : command)) return;
+            } else if (command === 'reload') {
+              if (!await this.reloadCommands()) return;
+            } else if (!await this.sessionAction(command === 'new' ? 'new' : 'history')) return;
+          }
+          outcome = 'accepted';
+          return;
+        }
+        if (!await this.chooseRoot() || !await this.connect()) return;
         if (!this.root || !this.client) return;
         const client = this.client;
         if (!(vscode.workspace.workspaceFolders ?? []).some(f => f.uri.toString() === this.root?.key)) return;
@@ -448,9 +532,9 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
           this.update(undefined, l('Open the Pi terminal to sign in or select a model first.', '请先打开 Pi 终端登录或选择模型。'));
           return;
         }
-        const slash = text.trim().match(/^\/([a-z][\w:-]*)(?:\s|$)/i);
-        if (slash && !slash[1].startsWith('skill:') && !this.slash.some(command => command.name === slash[1])) {
-          this.update(undefined, l('Use the Pi terminal for this command, or the panel controls for model and history.', '此命令请用 Pi 终端。模型与历史也可在侧栏中操作。'));
+        if (command && !this.slash?.some(item => item.name === command)) {
+          this.update(undefined, l('This command is not listed by Pi RPC. Open the Pi terminal to check the commands there.',
+            'Pi RPC 未列出此命令。请打开 Pi 终端，查看终端支持的命令。'));
           return;
         }
         const attached = [...this.context];
@@ -463,8 +547,9 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
         const token = { ended: false, acknowledged: false };
         this.acceptedPrompt = token;
         this.update('running');
+        outcome = 'unknown';
         const data = rec(await client.request('prompt', { message }, 0));
-        accepted = true;
+        outcome = 'accepted';
         token.acknowledged = true;
         const sent = new Set(attached.map(c => c.id));
         this.context = this.context.filter(c => !sent.has(c.id));
@@ -478,11 +563,12 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
         }
       });
     } catch (error) {
+      if (error instanceof RpcError && error.kind === 'rejected' && error.command === 'prompt') outcome = 'rejected';
       this.acceptedPrompt = undefined;
       if (this.phase === 'running' && this.client) this.update('idle');
       this.report(error);
     } finally {
-      this.post({ type: 'sendResult', id, accepted });
+      this.post({ type: 'sendResult', id, outcome });
       this.refreshView();
     }
   }
@@ -636,7 +722,7 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
     this.report(error);
   }
 
-  private async openTerminal() {
+  private async openTerminal(command?: string) {
     const root = this.root;
     if (!root || this.handoff || this.phase === 'running' || this.dialogs.size) return;
     const invocation = this.invocation && this.client ? this.invocation : await this.launcher();
@@ -665,7 +751,11 @@ class PiPanel implements vscode.WebviewViewProvider, vscode.Disposable {
         }
       }).catch(() => {});
       terminal.show();
-      this.update('terminal', l('This conversation is in the Pi terminal.', '会话已移交到 Pi 终端。'));
+      this.update('terminal', command
+        ? l(`Run /${command} in the Pi terminal. When finished, run /quit there, then start Pi here.`,
+          `请在 Pi 终端执行 /${command}。完成后在终端执行 /quit，再从侧栏启动 Pi。`)
+        : l('This conversation is in the Pi terminal.', '会话已移交到 Pi 终端。'));
+      return true;
     } catch (e) {
       this.handoff = undefined;
       await this.ctx.workspaceState.update(HANDOFF, undefined);

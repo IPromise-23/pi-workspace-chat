@@ -13,7 +13,8 @@ export type Dialog = {
 export type Snapshot = {
   host: string; folder: string; hasFolder: boolean; phase: 'disconnected' | 'connecting' | 'idle' | 'running' | 'terminal' | 'transferring';
   version?: string; notice?: string; settingsHint: boolean; session?: string;
-  model?: ModelChoice; thinking?: string; models: ModelChoice[]; thinkingLevels: string[]; slash: SlashChoice[];
+  model?: ModelChoice; thinking?: string; models: ModelChoice[]; thinkingLevels: string[];
+  slash: SlashChoice[]; commandsLoaded: boolean;
   context: ContextChip[]; dialogs: Dialog[]; rows: Row[]; toolExpanded: boolean; modifierSend: boolean;
   status: string[]; extensionTitle?: string;
 };
@@ -38,9 +39,9 @@ export function modelChoice(value: unknown): ModelChoice | undefined {
 export function slashChoices(value: unknown): SlashChoice[] {
   return arr(rec(value).commands).map(rec).flatMap(c => {
     const name = bounded(c.name, 240);
-    if (!name || /\s/.test(name)) return [];
+    if (!name || /\s/.test(name) || name.startsWith('/')) return [];
     return [{ name, description: bounded(c.description, 300), source: bounded(c.source, 24) }];
-  }).slice(0, 400);
+  });
 }
 export function toolCall(id: string, name: string, args: unknown): Row {
   const a = rec(args);

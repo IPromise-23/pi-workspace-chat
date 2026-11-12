@@ -103,9 +103,11 @@ export class PiRpc {
       pending.reject(new RpcError('protocol', pending.command));
     } else if (record.success === true) {
       pending.resolve(record.data);
-    } else {
+    } else if (record.success === false) {
       pending.reject(new RpcError('rejected', pending.command,
         typeof record.error === 'string' ? record.error.slice(0, 4000) : undefined));
+    } else {
+      pending.reject(new RpcError('protocol', pending.command));
     }
   }
 

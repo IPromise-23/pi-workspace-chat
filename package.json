@@ -2,9 +2,19 @@
   "name": "pi-workspace-chat",
   "displayName": "Pi Workspace Chat",
   "description": "A VS Code chat interface for your installed Pi Coding Agent, locally or over Remote-SSH.",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "publisher": "ipromise",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IPromise-23/pi-workspace-chat.git"
+  },
+  "homepage": "https://github.com/IPromise-23/pi-workspace-chat#readme",
+  "bugs": {
+    "url": "https://github.com/IPromise-23/pi-workspace-chat/issues"
+  },
+  "keywords": ["Pi Coding Agent", "AI", "Chat", "Remote-SSH", "Sidebar"],
   "engines": { "vscode": "^1.145.0", "node": ">=22.19.0" },
   "categories": ["AI", "Other"],
   "main": "./dist/extension.cjs",
@@ -70,7 +80,7 @@
     "test": "npm run build && node --test test/*.test.cjs",
     "test:vscode": "npm run build && node test/run-vscode.cjs",
     "test:pi": "npm run build && node test/pi-smoke.cjs",
-    "package:vsix": "npm run check && npm run build && vsce package --allow-missing-repository --skip-license --no-dependencies --out dist"
+    "package:vsix": "npm run check && npm run build && vsce package --no-dependencies --out dist"
   },
   "dependencies": { "markdown-it": "15.0.3" },
   "devDependencies": {
