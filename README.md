@@ -1,4 +1,4 @@
-# Pi Workspace Chat
+# Pi Coding Agent Chat for VS Code
 
 在 VS Code 的右侧辅助侧栏使用 [Pi Coding Agent](https://pi.dev/)。点击 **Pi** 标签或编辑器工具栏中的 **π**，即可打开聊天。本机窗口调用本机 Pi，Remote-SSH 窗口调用服务器上的 Pi。
 
